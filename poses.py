@@ -5,20 +5,7 @@ import numpy as np
 import os
 
 
-# Tasks:
-#   * read problem: local, http
-#   * Define class problem
-#      - Contains JSON
-#      - Contains structural information (e.g., joints=graph cut points)
-#   * display problem
-#   * solve problem, allowing multiple solutions per problem
-#       - Strategy:
-#          o Use numpy arrays
-#          o Rotate joints (cut points), and squash/stretch elsewhere.
-#          o Modify strategy based on visualization of solutions
-#   * display solution
-#   * compute score for problem
-#   * submit solution: http
+# Note: See README for TODO list
 
 # TODO
 # def display():
@@ -57,6 +44,12 @@ class PoseProb:
             fig_edges=problem['figure']['edges']
             epsilon=problem['epsilon']
             return hole, fig_verts, fig_edges, epsilon
+
+    def analyze(self):
+        """Adds info helpful to solve method
+        Example: Cut points in graph, where parts can be freely rotated.
+        """
+        pass
 
     def display(self):
         pass
