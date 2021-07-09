@@ -6,27 +6,29 @@ import json
 import networkx as nx
 import numpy as np
 
-from util import dict_merge
 
 # Note: See README for TODO list
 
 # TODO
 # def display():
 
+POINT_AT_INFINITY = (1_000_000, 1_000_000)
+
+
 class PoseProb:
     problem_dir = './problems'
 
     @classmethod
-    def download(prob_num): 
+    def download(id):
         raise NotImplementedError
 
-    def __init__(self, prob_num):
+    def __init__(self, id):
         """Loads problem from local file.
         Either solve() or read_soln() is called later.
         """
-        self.prob_num = prob_num
+        self.id = id
 
-        prob = self._get_prob(prob_num)
+        prob = self._get_prob(id)
         self.hole = np.array(prob[0])
         self.fig_verts = np.array(prob[1])
         self.fig_edges = np.array(prob[2])
@@ -44,20 +46,20 @@ class PoseProb:
         pass
 
     def __str__(self):
-        return (f'{self.prob_num}: '
+        return (f'{self.id}: '
                 + f'hole.shape={self.hole.shape}; '
                 + f'fig_verts.shape={self.fig_verts.shape}; '
                 + f'fig_edges.shape={self.fig_edges.shape}; '
-                + f'epsilon={self.epsilon}'
+                + f'epsilon%={100*self.epsilon/1_000_000}'
                 )
 
-    def _get_prob(self, prob_num): 
+    def _get_prob(self, id):
         """Reads problem from local JSON file
         Returns hole, fig_verts, fig_edges, epsilon
         Called by constructor
-        Only one problem file per prob_num
+        Only one problem file per id
         """
-        in_path = os.path.join(PoseProb.problem_dir, str(prob_num) + '.problem')
+        in_path = os.path.join(PoseProb.problem_dir, str(id) + '.problem')
         with open(in_path, 'r') as f:
             problem = json.load(f)
             hole = problem['hole']
@@ -70,12 +72,6 @@ class PoseProb:
         """Adds info helpful to solve method
         Example: Cut points in graph, where parts can be freely rotated.
         """
-        # vert_count = len(self.fig_verts)
-        # adj_dict = dict_merge(
-        #                {a:b for (a,b) in self.fig_edges},
-        #                {b:a for (a,b) in self.fig_edges}
-        #                )
-        # adj_matrix = [[1 if (a,b) for (a,b) in adj_dict.items())
         self.graph = nx.convert.from_edgelist(self.fig_edges)
         self.cut_points = list(nx.articulation_points(self.graph))
         assert(self.graph is not None)
@@ -84,9 +80,19 @@ class PoseProb:
     def display(self):
         pass
 
-    def read_soln(self, prob_num): 
+    # TODO: Test cases: figure {vertex,edge} {intersects,overlaps} hole {vertex,edge}
+    def is_soln(self, verts):
+        # Step 1: Test whether verts[0] lies inside hole
+        vert0 = verts[0]
+
+        # Step 2: Test whether any edges cross hole boundary
+        edges = [(self.fig_verts[a], self.fig_verts[b]) for a,b in self.fig_edges]
+        # TODO: Use is_inside_sm_parallel
+        raise NotImplementedError
+
+    def read_soln(self, id):
         """Reads solution from local JSON file
-        Allows for multiple solutions per prob_num
+        Allows for multiple solutions per problem
         """
         pass
 
@@ -101,7 +107,7 @@ class PoseProb:
         pass
 
 
-def test():
+def test_analyze():
     prob3 = PoseProb(3)
     assert(len(prob3.fig_verts) == 36)
     assert(prob3.cut_points is None)
@@ -111,11 +117,12 @@ def test():
 
 
 if __name__ == '__main__':
-    test() 
-    prob_num = 1
-    prob = PoseProb(prob_num)
-    print(prob)
-    prob.analyze()
-    prob.solve()
-    # prob.display()
-    prob.write_soln()
+    test_analyze()
+    for id in range(1, 10+1):
+       prob = PoseProb(id)
+       print(prob)
+       # print(f'{prob.id}: Is fig_verts a solution?: {prob.is_soln(prob.fig_verts)}')
+       # prob.analyze()
+       # prob.solve()
+       # prob.display()
+       # prob.write_soln()
