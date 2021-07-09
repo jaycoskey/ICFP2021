@@ -10,6 +10,29 @@ import numba
 import numpy as np
 
 
+def do_edges_cross(e1, e2):
+    a1, b1 = e1
+    a2, b2 = e2
+    orientation_a2 = geom_orientation(a1, b1, a2)
+    orientation_b2 = geom_orientation(a1, b1, b2)
+    orientation_a1 = geom_orientation(a2, b2, a1)
+    orientation_b1 = geom_orientation(a2, b2, b1)
+
+    if (orientation_a2 * orientation_b2 == -1
+            and orientation_a1 * orientation_b1 == -1):
+        return True
+
+    return False
+ 
+
+def geom_orientation(a, b, c):
+    """Returns 0 if points are colinear, 1 if clockwise, -1 if counter-clockwise
+       Does so by computing determinant of matrix row vectors a, b, c, extended w/ 1.
+    """
+    det = (b[1] - a[1]) * (c[0] - b[0]) - (b[0] - a[0]) * (c[1] - b[1])
+    return sgn(det)
+
+
 # From https://github.com/sasamil/PointInPolygon_Py/blob/master/pointInside.py
 #   - No license file. Will remove from this repo upon requrest.
 # Found on stackoverflow at https://stackoverflow.com/questions/36399381/whats-the-fastest-way-of-checking-if-a-point-is-inside-a-polygon-in-python
@@ -93,6 +116,17 @@ def test_is_inside_sm_parallel():
     plt.ylabel("time (sec)")
     plt.legend(loc = 'best')
     plt.show()
+
+
+def nodes_to_closed_polygon_edges(nodes):
+    return (
+            [(nodes[k], nodes[k+1]) for k in range(0, len(nodes) - 2)]
+            + [(nodes[-1], nodes[0])]
+            )
+
+
+def sgn(x):
+    return 1 if x > 0 else (-1 if x < 0 else 0)
 
 
 if __name__ == '__main__':

@@ -7,6 +7,8 @@ from matplotlib import pyplot as plt
 import networkx as nx
 import numpy as np
 
+from util import is_inside_sm, do_edges_cross, nodes_to_closed_polygon_edges
+
 
 class PoseProb:
     problem_dir = './problems'
@@ -87,9 +89,6 @@ class PoseProb:
         plt.plot(fig_x[self.fig_edges.T], fig_y[self.fig_edges.T],
                 linestyle='-', color='red', markerfacecolor='red', marker='o')
 
-        # TODO: JMC: Remove following test line
-        self.soln_verts = self.fig_verts
-
         if self.soln_verts is not None:
             soln_x = self.soln_verts[:,0].flatten()
             soln_y = self.soln_verts[:,1].flatten()
@@ -102,12 +101,18 @@ class PoseProb:
     # TODO: Test cases: figure {vertex,edge} {intersects,overlaps} hole {vertex,edge}
     def is_soln(self, verts):
         # Step 1: Test whether verts[0] lies inside hole
-        vert0 = verts[0]
+        if not is_inside_sm(self.hole, verts[0]):
+            return False
 
         # Step 2: Test whether any edges cross hole boundary
-        edges = [(self.fig_verts[a], self.fig_verts[b]) for a,b in self.fig_edges]
-        # TODO: Use is_inside_sm_parallel
-        raise NotImplementedError
+        hole_edges = nodes_to_closed_polygon_edges(self.hole)
+        fig_edges = [(self.fig_verts[a], self.fig_verts[b]) for a,b in self.fig_edges]
+        for hole_edge in hole_edges:
+            for fig_edge in fig_edges:
+                if do_edges_cross(hole_edge, fig_edge):
+                    return False
+
+        return True
 
     def read_soln(self, id):
         """Reads solution from local JSON file
@@ -135,14 +140,39 @@ def test_analyze():
     assert(len(prob3.cut_points) == 16)
 
 
+def test_display():
+    def hshift5(p):
+        return np.array([p[0] + 5, p[1]])
+
+    prob2 = PoseProb(2)
+
+    prob2.soln_verts = prob2.fig_verts.copy()
+    # np_hshift5 = np.vectorize(hshift5)  # Vectorize isn't very efficient, but that's OK.
+    # prob2.soln_verts = np_hshift5(prob2.soln_verts)
+    for k in range(len(prob2.soln_verts)):
+        prob2.soln_verts[k][0] += 5
+    prob2.display()
+
+
+def test_is_soln():
+    prob6mod = PoseProb(6)
+
+    assert(not prob6mod.is_soln(prob6mod.fig_verts))  # Original figure is not a solution
+    # Remove the dent from the hole, chaning if from pac-man-like to roundish
+    prob6mod.hole[-2][0] = prob6mod.hole[-1][0]
+    # The original is a solution for the modified hole
+    assert(prob6mod.is_soln(prob6mod.fig_verts))
+
+
 if __name__ == '__main__':
     test_analyze()
+    # test_display()
+    test_is_soln()
     for id in range(1, 10+1):
        prob = PoseProb(id)
        print(prob)
        prob.display()
-       # print(f'{prob.id}: Is fig_verts a solution?: {prob.is_soln(prob.fig_verts)}')
-       # prob.analyze()
-       # prob.solve()
-       # prob.display()
-       # prob.write_soln()
+       prob.analyze()
+       prob.solve()
+       prob.display()
+       prob.write_soln()
