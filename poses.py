@@ -8,14 +8,6 @@ import networkx as nx
 import numpy as np
 
 
-# Note: See README for TODO list
-
-# TODO
-# def display():
-
-POINT_AT_INFINITY = (1_000_000, 1_000_000)
-
-
 class PoseProb:
     problem_dir = './problems'
 
@@ -92,9 +84,19 @@ class PoseProb:
         fig_x = self.fig_verts[:,0].flatten()
         fig_y = self.fig_verts[:,1].flatten()
         fig_y = vflip(fig_y)
-        # print(f'y:{type(y)}={y}')
         plt.plot(fig_x[self.fig_edges.T], fig_y[self.fig_edges.T],
                 linestyle='-', color='red', markerfacecolor='red', marker='o')
+
+        # TODO: JMC: Remove following test line
+        self.soln_verts = self.fig_verts
+
+        if self.soln_verts is not None:
+            soln_x = self.soln_verts[:,0].flatten()
+            soln_y = self.soln_verts[:,1].flatten()
+            soln_y = vflip(soln_y)
+            plt.plot(soln_x[self.fig_edges.T], soln_y[self.fig_edges.T],
+                    linestyle='-', color='green', markerfacecolor='green', marker='o')
+
         plt.show()
 
     # TODO: Test cases: figure {vertex,edge} {intersects,overlaps} hole {vertex,edge}
