@@ -63,6 +63,8 @@ def is_inside_sm_parallel(points, polygon):
     return D
 
 
+# Found on stackoverflow at https://stackoverflow.com/questions/36399381/whats-the-fastest-way-of-checking-if-a-point-is-inside-a-polygon-in-python
+#  - Posted by @Mehdi
 def test_is_inside_sm_parallel():
     np.random.seed(2)
 
