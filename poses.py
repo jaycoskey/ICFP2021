@@ -5,6 +5,7 @@ import os
 import json
 from matplotlib import pyplot as plt
 import networkx as nx
+from networkx.algorithms.components import connected_components
 import numpy as np
 
 from util import is_inside_sm, do_edges_cross, nodes_to_closed_polygon_edges
@@ -68,9 +69,14 @@ class PoseProb:
         Example: Cut points in graph, where parts can be freely rotated.
         """
         self.graph = nx.convert.from_edgelist(self.fig_edges)
-        self.cut_points = list(nx.articulation_points(self.graph))
         assert(self.graph is not None)
+        self.cut_points = list(nx.articulation_points(self.graph))
         assert(self.cut_points is not None)
+
+        self.cut_graph = self.graph.copy()
+        self.cut_graph.remove_nodes_from(self.cut_points)
+        self.cut_components = connected_components(self.cut_graph)
+        cut_components_count = len([cc for cc in self.cut_components])
 
     def display(self):
         def vflip(x):
@@ -99,6 +105,7 @@ class PoseProb:
         plt.show()
 
     # TODO: Test cases: figure {vertex,edge} {intersects,overlaps} hole {vertex,edge}
+    # TODO: Add test for epsilon distortion
     def is_soln(self, verts):
         # Step 1: Test whether verts[0] lies inside hole
         if not is_inside_sm(self.hole, verts[0]):
@@ -171,8 +178,7 @@ if __name__ == '__main__':
     for id in range(1, 10+1):
        prob = PoseProb(id)
        print(prob)
-       prob.display()
        prob.analyze()
        prob.solve()
-       prob.display()
+       # prob.display()
        prob.write_soln()
