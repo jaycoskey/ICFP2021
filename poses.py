@@ -3,6 +3,7 @@
 import os
 
 import json
+from matplotlib import pyplot as plt
 import networkx as nx
 import numpy as np
 
@@ -78,7 +79,23 @@ class PoseProb:
         assert(self.cut_points is not None)
 
     def display(self):
-        pass
+        def vflip(x):
+            return -x
+
+        plt.title(f'Problem {self.id}')
+        hole_x = self.hole[:,0].flatten()
+        hole_y = self.hole[:,1].flatten()
+        hole_y = vflip(hole_y)
+        plt.fill(hole_x, hole_y, fill=False,
+                linestyle='-', color='blue')
+
+        fig_x = self.fig_verts[:,0].flatten()
+        fig_y = self.fig_verts[:,1].flatten()
+        fig_y = vflip(fig_y)
+        # print(f'y:{type(y)}={y}')
+        plt.plot(fig_x[self.fig_edges.T], fig_y[self.fig_edges.T],
+                linestyle='-', color='red', markerfacecolor='red', marker='o')
+        plt.show()
 
     # TODO: Test cases: figure {vertex,edge} {intersects,overlaps} hole {vertex,edge}
     def is_soln(self, verts):
@@ -121,6 +138,7 @@ if __name__ == '__main__':
     for id in range(1, 10+1):
        prob = PoseProb(id)
        print(prob)
+       prob.display()
        # print(f'{prob.id}: Is fig_verts a solution?: {prob.is_soln(prob.fig_verts)}')
        # prob.analyze()
        # prob.solve()
