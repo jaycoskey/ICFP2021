@@ -11,6 +11,7 @@ import numpy as np
 from util import is_inside_sm, do_edges_cross, nodes_to_closed_polygon_edges
 
 
+# TODO: Keep attempt iterations distinct from solution?
 class PoseProb:
     problem_dir = './problems'
 
@@ -33,6 +34,7 @@ class PoseProb:
         # Populated by analyze()
         self.graph = None
         self.cut_points = None
+        self.cut_components = None
 
         # Populated by solve or read_soln()
         self.soln_verts = None
@@ -72,10 +74,19 @@ class PoseProb:
         assert(self.graph is not None)
         self.cut_points = list(nx.articulation_points(self.graph))
         assert(self.cut_points is not None)
+        cp2nbrs = {cp:set(self.graph.neighbors(cp)) for cp in self.cut_points}
 
-        self.cut_graph = self.graph.copy()
-        self.cut_graph.remove_nodes_from(self.cut_points)
-        self.cut_components = connected_components(self.cut_graph)
+        cut_graph = self.graph.copy()
+        cut_graph.remove_nodes_from(self.cut_points)
+        self.cut_components = connected_components(cut_graph)
+
+        # Add each cutpoint to each of its neighboring cut components
+        for cp in self.cut_points:
+            for cc in self.cut_components:
+                if any((node in cp2nbrs[cp] for node in cc)):
+                    print(f'INFO: Adding cut point {cp} to a cut component')
+                    cc.add(cp)
+        
         cut_components_count = len([cc for cc in self.cut_components])
 
     def display(self):
@@ -104,9 +115,7 @@ class PoseProb:
 
         plt.show()
 
-    # TODO: Test cases: figure {vertex,edge} {intersects,overlaps} hole {vertex,edge}
-    # TODO: Add test for epsilon distortion
-    def is_soln(self, verts):
+    def is_edgelist_in_hole(self, verts):
         # Step 1: Test whether verts[0] lies inside hole
         if not is_inside_sm(self.hole, verts[0]):
             return False
@@ -121,6 +130,13 @@ class PoseProb:
 
         return True
 
+    # TODO: Test cases: figure {vertex,edge} {intersects,overlaps} hole {vertex,edge}
+    def is_soln(self, verts):
+        done = self.is_edgelist_in_hole(verts)
+        if done:
+            return True
+        # TODO: Add test for epsilon distortion
+
     def read_soln(self, id):
         """Reads solution from local JSON file
         Allows for multiple solutions per problem
@@ -128,7 +144,17 @@ class PoseProb:
         pass
 
     def solve(self):
-        pass
+        # Is the original problem already solved?
+        if self.is_soln(self.fig_verts):
+            self.soln_verts = self.fig_verts.copy()
+            return
+
+        # Temporary question: Is there a cut component that, with the cut points, lives entirely within the hole?
+        for cc in self.cut_components:
+            if all(is_inside_sm(self.hole, node) for node in cc):
+                print('INFO: Found cut component that lies entirely within hole')
+
+        print('INFO: Failed to find solution')
 
     def score(self, verts):
         pass
