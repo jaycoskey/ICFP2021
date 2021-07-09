@@ -1,9 +1,12 @@
 #!/usr/bin/env python
 
-import json
-import numpy as np
 import os
 
+import json
+import networkx as nx
+import numpy as np
+
+from util import dict_merge
 
 # Note: See README for TODO list
 
@@ -29,6 +32,11 @@ class PoseProb:
         self.fig_edges = np.array(prob[2])
         self.epsilon = int(prob[3])
 
+        # Populated by analyze()
+        self.graph = None
+        self.cut_points = None
+
+        # Populated by solve or read_soln()
         self.soln_verts = None
         self.soln_score = None
 
@@ -37,9 +45,9 @@ class PoseProb:
 
     def __str__(self):
         return (f'{self.prob_num}: '
-                + f'hole={self.hole.shape}; '
-                + f'fig_verts={self.fig_verts.shape}; '
-                + f'fig_edges={self.fig_edges.shape}; '
+                + f'hole.shape={self.hole.shape}; '
+                + f'fig_verts.shape={self.fig_verts.shape}; '
+                + f'fig_edges.shape={self.fig_edges.shape}; '
                 + f'epsilon={self.epsilon}'
                 )
 
@@ -62,7 +70,16 @@ class PoseProb:
         """Adds info helpful to solve method
         Example: Cut points in graph, where parts can be freely rotated.
         """
-        pass
+        # vert_count = len(self.fig_verts)
+        # adj_dict = dict_merge(
+        #                {a:b for (a,b) in self.fig_edges},
+        #                {b:a for (a,b) in self.fig_edges}
+        #                )
+        # adj_matrix = [[1 if (a,b) for (a,b) in adj_dict.items())
+        self.graph = nx.convert.from_edgelist(self.fig_edges)
+        self.cut_points = list(nx.articulation_points(self.graph))
+        assert(self.graph is not None)
+        assert(self.cut_points is not None)
 
     def display(self):
         pass
@@ -83,10 +100,22 @@ class PoseProb:
     def write_soln(self):
         pass
 
+
+def test():
+    prob3 = PoseProb(3)
+    assert(len(prob3.fig_verts) == 36)
+    assert(prob3.cut_points is None)
+    prob3.analyze()
+    assert(len(prob3.graph) == 36)
+    assert(len(prob3.cut_points) == 16)
+
+
 if __name__ == '__main__':
+    test() 
     prob_num = 1
     prob = PoseProb(prob_num)
     print(prob)
+    prob.analyze()
     prob.solve()
     # prob.display()
     prob.write_soln()
