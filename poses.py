@@ -21,14 +21,27 @@ class PoseProb:
         """Loads problem from local file.
         Either solve() or read_soln() is called later.
         """
+        self.prob_num = prob_num
+
         prob = self._get_prob(prob_num)
-        self.hole = prob[0]
-        self.fig_verts = prob[1]
-        self.fig_edges = prob[2]
-        self.epsilon = prob[3]
+        self.hole = np.array(prob[0])
+        self.fig_verts = np.array(prob[1])
+        self.fig_edges = np.array(prob[2])
+        self.epsilon = int(prob[3])
 
         self.soln_verts = None
         self.soln_score = None
+
+    def __repr__(self):
+        pass
+
+    def __str__(self):
+        return (f'{self.prob_num}: '
+                + f'hole={self.hole.shape}; '
+                + f'fig_verts={self.fig_verts.shape}; '
+                + f'fig_edges={self.fig_edges.shape}; '
+                + f'epsilon={self.epsilon}'
+                )
 
     def _get_prob(self, prob_num): 
         """Reads problem from local JSON file
@@ -73,6 +86,7 @@ class PoseProb:
 if __name__ == '__main__':
     prob_num = 1
     prob = PoseProb(prob_num)
+    print(prob)
     prob.solve()
     # prob.display()
     prob.write_soln()
