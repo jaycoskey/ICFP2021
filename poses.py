@@ -9,7 +9,14 @@ import networkx as nx
 from networkx.algorithms.components import connected_components
 import numpy as np
 
-from util import is_inside_sm, do_edges_cross, geom_vec_dist_polygon_vertex, verts_to_closed_polygon_edges
+import http.client as httplib
+import urllib3
+
+from util import is_inside_sm
+from util import do_edges_cross
+from util import geom_vec_dist_polygon_vertex
+from util import geom_dist_vertex_vertex
+from util import verts_to_closed_polygon_edges
 
 
 @dataclass
@@ -55,6 +62,7 @@ class PoseTools:
 # TODO: Keep attempt iterations distinct from solution?
 class PoseProb:
     problem_dir = './problems'
+    soln_dir = './solutions'
 
     @classmethod
     def download(id):
@@ -76,12 +84,12 @@ class PoseProb:
         self.tools = None
 
         # Populated by solve or read_pose()
-        # pose_score can be used to determine whether pose_verts is actually valid---not just an attempt
         self.pose_verts = None
-        self.pose_score = None
+        self.pose_is_valid = None
+        self.pose_dislikes = None
 
     def __repr__(self):
-        pass
+        raise NotImplementedError
 
     def __str__(self):
         return (f'{self.id}: '
@@ -107,8 +115,11 @@ class PoseProb:
             return hole, fig_verts, fig_edges, epsilon
 
     def dislikes(self):
-        # TODO: Sum over all holes of min(v in pose) d(h, v)
-        pass
+        result = 0
+        for h in self.hole:
+            distances = [geom_dist_vertex_vertex(h, v) for v in self.pose_verts]
+            result += min(distances)
+        return result
 
     def display(self):
         def vflip(x):
@@ -162,10 +173,40 @@ class PoseProb:
 
     # TODO: Test cases: figure {vertex,edge} {intersects,overlaps} hole {vertex,edge}
     def is_soln(self, verts):
-        done = self.is_edgelist_in_hole(verts)
-        if done:
-            return True
-        # TODO: Add test for epsilon distortion
+        """Solution criteria (from spec PDF):
+        (a) Conn: All graph manipulations preserve vertex connectedness
+        (b) Eps:  Edges can only be compressed or stretched within epsilon threshold: abs((d' / d) - 1) <= eps/1_000_000
+        (c) Fit:  Every point of pose must lie on or in hole boundary
+        """
+        # (a) Connectedness: For now, assume we haven't goofed by breaking connectedness
+        #     TODO (optional): Add sanity check
+
+        # (b) Epsilon
+        for ei in range(len(self.fig_edges)):
+            old_dist = geom_dist_vertex_vertex(
+                            self.fig_verts[self.fig_edges[ei][0]],
+                            self.fig_verts[self.fig_edges[ei][1]]
+                            )
+            new_dist = geom_dist_vertex_vertex(
+                            verts[self.fig_edges[ei][0]],
+                            verts[self.fig_edges[ei][1]]
+                            )
+            distortion = abs((new_dist / old_dist) - 1)
+            if distortion > (self.epsilon / 1_000_000):
+                print(f'INFO: is_soln: Failed Epsilon criterion')
+                return False
+
+        # (c) Fit
+        if not self.is_edgelist_in_hole(verts):
+            print(f'INFO: is_soln: Failed Fit criterion')
+            return False
+
+        return True
+
+    def pose_verts_to_json(self):
+        result = {'vertices': json.dumps(self.pose_verts)}
+        print(f'INFO: pose_verts_to_json: result={result}')
+        return result
 
     def read_pose(self, id):
         """Reads solution from local JSON file
@@ -190,14 +231,28 @@ class PoseProb:
 
         # print('INFO: Failed to find solution')
 
-    def score(self, verts):
-        pass
-
     def submit(self):
-        pass
+        host = 'poses.live'
+        url = f'/problems/{self.id}/solutions'
+        api_token = os.environ['ICFP_2021_API_TOKEN']
+        headers = {
+                'User-Agent': 'python',
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Authorization': api_token,
+                }
+        content = urllib3.urlencode(self.pose_verts_to_json())
 
-    def write_pose(self):
-        pass
+        conn = httplib.HTTPSConnection(host)
+        conn.request('POST', url, content, headers)
+        response = conn.getresponse()
+        data = response.read()
+        print('Solution for #{self.id} submitted')
+        print(f'Response status: {response.status}; reason={response.reason}')
+        print('Data: ')
+        print(data)
+
+    def write_pose(self, fname):
+        raise NotImplementedError
 
 
 def test_init_tools():
@@ -242,4 +297,5 @@ if __name__ == '__main__':
        prob.init_tools()
        prob.solve()
        # prob.display()
-       prob.write_pose()
+       if prob.pose_verts is not None:
+           prob.write_pose(os.path.join(PoseProb.soln_dir, f'{self.id}.solution'))
