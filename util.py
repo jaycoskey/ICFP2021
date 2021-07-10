@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+from math import sqrt
 from time import time
 
 
@@ -23,7 +24,50 @@ def do_edges_cross(e1, e2):
         return True
 
     return False
- 
+
+
+def geom_vec_dist_edge_vertex(a, b, node):
+    dist2 = geom_dist2_vertex_vertex(a, b)
+    if dist2 == 0.0:
+        return geom_dist_vertex_vertex(a, node)
+
+    t = geom_dot(node - a, b - a) / dist2
+    if t < 0.0:
+        return a - node, geom_dist_vertex_vertex(a, node)
+    elif t > 1.0:
+        return b - node, geom_dist_vertex_vertex(b, node)
+    else:
+        min_vec = a + t * (b - a) - node
+        min_dist = geom_dist_vertex_vertex(min_vec, node)
+        return min_vec, min_dist
+
+
+def geom_vec_dist_polygon_vertex(poly, node):
+    edges = verts_to_closed_polygon_edges(poly)
+    e0 = edges[0]
+    min_vec, min_dist = geom_vec_dist_edge_vertex(e0[0], e0[1], node)
+    for e in edges[1:]:
+        cur_vec, cur_dist = geom_vec_dist_edge_vertex(e0[0], e0[1], node)
+        if cur_dist < min_dist:
+            min_vec = cur_vec
+            min_dist = cur_dist
+    return min_vec, min_dist
+
+def geom_dist_vertex_vertex(a, b):
+    return sqrt(geom_dist2_vertex_vertex(a, b))
+
+
+def geom_dist2_vertex_vertex(a, b):
+    return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
+
+
+def geom_dot(a, b):
+    return a[0] * b[0] + a[1] * b[1]
+
+
+def geom_norm(v):
+    return sqrt(geom_dot(v, v))
+
 
 def geom_orientation(a, b, c):
     """Returns 0 if points are colinear, 1 if clockwise, -1 if counter-clockwise
@@ -31,6 +75,19 @@ def geom_orientation(a, b, c):
     """
     det = (b[1] - a[1]) * (c[0] - b[0]) - (b[0] - a[0]) * (c[1] - b[1])
     return sgn(det)
+
+
+# TODO: Take edges into account
+def geom_proximity(verts, edges, node):
+    """Return vector pointing from node to nearest vert."""
+    min_dist = geom_distance_vertex_vertex(verts[0], node)
+    min_vec  = verts[0] - node
+    for v in verts:
+        cur_dist = geom_distance_vertex_vertex(v, node)
+        if  cur_dist < min_dist:
+            min_dist = cur_dist
+            min_vec = v - node
+    return min_vec
 
 
 # From https://github.com/sasamil/PointInPolygon_Py/blob/master/pointInside.py
@@ -118,10 +175,10 @@ def test_is_inside_sm_parallel():
     plt.show()
 
 
-def nodes_to_closed_polygon_edges(nodes):
+def verts_to_closed_polygon_edges(verts):
     return (
-            [(nodes[k], nodes[k+1]) for k in range(0, len(nodes) - 2)]
-            + [(nodes[-1], nodes[0])]
+            [(verts[k], verts[k+1]) for k in range(0, len(verts) - 1)]
+            + [(verts[-1], verts[0])]
             )
 
 
