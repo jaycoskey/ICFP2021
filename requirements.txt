@@ -1,8 +1,9 @@
+http.client
 json
 matplotlib
 networkx
 numba
 numpy
-os
 time
 unittest
+urllib2
