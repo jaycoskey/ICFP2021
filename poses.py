@@ -72,7 +72,7 @@ class PoseProb:
         self.fig_edges = np.array(prob[2])
         self.epsilon = int(prob[3])
 
-        # Populated by analyze()
+        # Populated by init_tools()
         self.tools = None
 
         # Populated by solve or read_soln()
@@ -106,13 +106,6 @@ class PoseProb:
             epsilon=problem['epsilon']
             return hole, fig_verts, fig_edges, epsilon
 
-    # TODO: Put computed values in separate "Stats" class
-    def analyze(self):
-        """Adds info helpful to solve method
-        Example: Cut points in graph, where parts can be freely rotated.
-        """
-        self.tools = PoseTools(prob=self)
-
     def display(self):
         def vflip(x):
             return -x
@@ -141,6 +134,12 @@ class PoseProb:
 
     def hole_proximity_vert(self, node):
         return geom_vec_dist_polygon_vertex(self.hole, node)
+
+    def init_tools(self):
+        """Initializes info helpful in solving problem.
+        Example: Cut points in graph, around which components can be freely rotated.
+        """
+        self.tools = PoseTools(prob=self)
 
     def is_edgelist_in_hole(self, verts):
         # Step 1: Test whether verts[0] lies inside hole
@@ -192,10 +191,10 @@ class PoseProb:
         pass
 
 
-def test_analyze():
+def test_init_tools():
     prob3 = PoseProb(3)
     assert(len(prob3.fig_verts) == 36)
-    prob3.analyze()
+    prob3.init_tools()
     assert(len(prob3.tools.graph) == 36)
     assert(len(prob3.tools.cut_points) == 16)
 
@@ -225,13 +224,13 @@ def test_is_soln():
 
 
 if __name__ == '__main__':
-    test_analyze()
+    test_init_tools()
     # test_display()
     test_is_soln()
     for id in range(1, 10+1):
        prob = PoseProb(id)
        print(prob)
-       prob.analyze()
+       prob.init_tools()
        prob.solve()
        # prob.display()
        prob.write_soln()
