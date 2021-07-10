@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+from dataclasses import dataclass
 import os
 
 import json
@@ -9,6 +10,46 @@ from networkx.algorithms.components import connected_components
 import numpy as np
 
 from util import is_inside_sm, do_edges_cross, geom_vec_dist_polygon_vertex, verts_to_closed_polygon_edges
+
+
+@dataclass
+class PoseTools:
+    graph = None
+    cut_points = None
+    cut_components = None
+    vertnum2is_in_hole = None
+    vertnum2proximity = None
+
+    def __init__(self, prob):
+        self.graph = nx.convert.from_edgelist(prob.fig_edges)
+        assert(self.graph is not None)
+        self.cut_points = list(nx.articulation_points(self.graph))
+        assert(self.cut_points is not None)
+        cp2nbrs = {cp:set(self.graph.neighbors(cp))
+                      for cp in self.cut_points
+                      }
+
+        cut_graph = self.graph.copy()
+        cut_graph.remove_nodes_from(self.cut_points)
+        self.cut_components = connected_components(cut_graph)
+
+        # Convert cut_components from generate to list, allowing the cc's to be individually referenceable.
+        self.cut_components = [cc for cc in self.cut_components]
+
+        # Add each cutpoint to each of its neighboring cut components
+        for cp in self.cut_points:
+            for cc in self.cut_components:
+                if any((node in cp2nbrs[cp] for node in cc)):
+                    # print(f'INFO: Adding cut point {cp} to a cut component')
+                    cc.add(cp)
+
+        self.vertnum2is_in_hole = {k:is_inside_sm(prob.hole, prob.fig_verts[k])
+                                      for k in range(len(prob.fig_verts))
+                                      }
+        self.vertnum2proximity = {k:prob.hole_proximity_vert(prob.fig_verts[k])
+                                  for k in range(len(prob.fig_verts))
+                                  }
+        # self.edge2proximity = {e:self.hole_proximity_edge(e) for e in self.graph.edges()}
 
 
 # TODO: Keep attempt iterations distinct from solution?
@@ -32,11 +73,10 @@ class PoseProb:
         self.epsilon = int(prob[3])
 
         # Populated by analyze()
-        self.graph = None
-        self.cut_points = None
-        self.cut_components = None
+        self.tools = None
 
         # Populated by solve or read_soln()
+        # soln_score can be used to determine whether soln_verts is actually valid---not just an attempt
         self.soln_verts = None
         self.soln_score = None
 
@@ -71,33 +111,7 @@ class PoseProb:
         """Adds info helpful to solve method
         Example: Cut points in graph, where parts can be freely rotated.
         """
-        self.graph = nx.convert.from_edgelist(self.fig_edges)
-        assert(self.graph is not None)
-        self.cut_points = list(nx.articulation_points(self.graph))
-        assert(self.cut_points is not None)
-        cp2nbrs = {cp:set(self.graph.neighbors(cp)) for cp in self.cut_points}
-
-        cut_graph = self.graph.copy()
-        cut_graph.remove_nodes_from(self.cut_points)
-        self.cut_components = connected_components(cut_graph)
-
-        # Convert cut_components from generate to list, allowing the cc's to be individually referenceable.
-        self.cut_components = [cc for cc in self.cut_components]
-
-        # Add each cutpoint to each of its neighboring cut components
-        for cp in self.cut_points:
-            for cc in self.cut_components:
-                if any((node in cp2nbrs[cp] for node in cc)):
-                    # print(f'INFO: Adding cut point {cp} to a cut component')
-                    cc.add(cp)
-
-        self.vertnum2is_in_hole = {k:is_inside_sm(self.hole, self.fig_verts[k])
-                                      for k in range(len(self.fig_verts))
-                                      }
-        self.vertnum2proximity = {k:self.hole_proximity_vert(self.fig_verts[k])
-                                  for k in range(len(self.fig_verts))
-                                  }
-        # self.edge2proximity = {e:self.hole_proximity_edge(e) for e in self.graph.edges()}
+        self.tools = PoseTools(prob=self)
 
     def display(self):
         def vflip(x):
@@ -164,7 +178,7 @@ class PoseProb:
 
         # Temporary question: Is there a cut component that, with the cut points, lives entirely within the hole?
         # TODO: Also check edges.
-        for cc in self.cut_components:
+        for cc in self.tools.cut_components:
             if all(is_inside_sm(self.hole, self.fig_verts[node_i]) for node_i in cc):
                 print(f'INFO: {self.id}: Found cut component with verts entirely within hole')
 
@@ -181,10 +195,9 @@ class PoseProb:
 def test_analyze():
     prob3 = PoseProb(3)
     assert(len(prob3.fig_verts) == 36)
-    assert(prob3.cut_points is None)
     prob3.analyze()
-    assert(len(prob3.graph) == 36)
-    assert(len(prob3.cut_points) == 16)
+    assert(len(prob3.tools.graph) == 36)
+    assert(len(prob3.tools.cut_points) == 16)
 
 
 def test_display():
