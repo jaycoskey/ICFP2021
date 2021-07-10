@@ -8,7 +8,7 @@ import networkx as nx
 from networkx.algorithms.components import connected_components
 import numpy as np
 
-from util import is_inside_sm, do_edges_cross, nodes_to_closed_polygon_edges
+from util import is_inside_sm, do_edges_cross, geom_vec_dist_polygon_vertex, verts_to_closed_polygon_edges
 
 
 # TODO: Keep attempt iterations distinct from solution?
@@ -66,6 +66,7 @@ class PoseProb:
             epsilon=problem['epsilon']
             return hole, fig_verts, fig_edges, epsilon
 
+    # TODO: Put computed values in separate "Stats" class
     def analyze(self):
         """Adds info helpful to solve method
         Example: Cut points in graph, where parts can be freely rotated.
@@ -80,14 +81,23 @@ class PoseProb:
         cut_graph.remove_nodes_from(self.cut_points)
         self.cut_components = connected_components(cut_graph)
 
+        # Convert cut_components from generate to list, allowing the cc's to be individually referenceable.
+        self.cut_components = [cc for cc in self.cut_components]
+
         # Add each cutpoint to each of its neighboring cut components
         for cp in self.cut_points:
             for cc in self.cut_components:
                 if any((node in cp2nbrs[cp] for node in cc)):
-                    print(f'INFO: Adding cut point {cp} to a cut component')
+                    # print(f'INFO: Adding cut point {cp} to a cut component')
                     cc.add(cp)
-        
-        cut_components_count = len([cc for cc in self.cut_components])
+
+        self.vertnum2is_in_hole = {k:is_inside_sm(self.hole, self.fig_verts[k])
+                                      for k in range(len(self.fig_verts))
+                                      }
+        self.vertnum2proximity = {k:self.hole_proximity_vert(self.fig_verts[k])
+                                  for k in range(len(self.fig_verts))
+                                  }
+        # self.edge2proximity = {e:self.hole_proximity_edge(e) for e in self.graph.edges()}
 
     def display(self):
         def vflip(x):
@@ -115,13 +125,16 @@ class PoseProb:
 
         plt.show()
 
+    def hole_proximity_vert(self, node):
+        return geom_vec_dist_polygon_vertex(self.hole, node)
+
     def is_edgelist_in_hole(self, verts):
         # Step 1: Test whether verts[0] lies inside hole
         if not is_inside_sm(self.hole, verts[0]):
             return False
 
         # Step 2: Test whether any edges cross hole boundary
-        hole_edges = nodes_to_closed_polygon_edges(self.hole)
+        hole_edges = verts_to_closed_polygon_edges(self.hole)
         fig_edges = [(self.fig_verts[a], self.fig_verts[b]) for a,b in self.fig_edges]
         for hole_edge in hole_edges:
             for fig_edge in fig_edges:
@@ -150,11 +163,12 @@ class PoseProb:
             return
 
         # Temporary question: Is there a cut component that, with the cut points, lives entirely within the hole?
+        # TODO: Also check edges.
         for cc in self.cut_components:
-            if all(is_inside_sm(self.hole, node) for node in cc):
-                print('INFO: Found cut component that lies entirely within hole')
+            if all(is_inside_sm(self.hole, self.fig_verts[node_i]) for node_i in cc):
+                print(f'INFO: {self.id}: Found cut component with verts entirely within hole')
 
-        print('INFO: Failed to find solution')
+        # print('INFO: Failed to find solution')
 
     def score(self, verts):
         pass
