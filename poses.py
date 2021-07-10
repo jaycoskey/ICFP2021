@@ -62,7 +62,7 @@ class PoseProb:
 
     def __init__(self, id):
         """Loads problem from local file.
-        Either solve() or read_soln() is called later.
+        Either solve() or read_pose() is called later.
         """
         self.id = id
 
@@ -75,10 +75,10 @@ class PoseProb:
         # Populated by init_tools()
         self.tools = None
 
-        # Populated by solve or read_soln()
-        # soln_score can be used to determine whether soln_verts is actually valid---not just an attempt
-        self.soln_verts = None
-        self.soln_score = None
+        # Populated by solve or read_pose()
+        # pose_score can be used to determine whether pose_verts is actually valid---not just an attempt
+        self.pose_verts = None
+        self.pose_score = None
 
     def __repr__(self):
         pass
@@ -106,6 +106,10 @@ class PoseProb:
             epsilon=problem['epsilon']
             return hole, fig_verts, fig_edges, epsilon
 
+    def dislikes(self):
+        # TODO: Sum over all holes of min(v in pose) d(h, v)
+        pass
+
     def display(self):
         def vflip(x):
             return -x
@@ -123,11 +127,11 @@ class PoseProb:
         plt.plot(fig_x[self.fig_edges.T], fig_y[self.fig_edges.T],
                 linestyle='-', color='red', markerfacecolor='red', marker='o')
 
-        if self.soln_verts is not None:
-            soln_x = self.soln_verts[:,0].flatten()
-            soln_y = self.soln_verts[:,1].flatten()
-            soln_y = vflip(soln_y)
-            plt.plot(soln_x[self.fig_edges.T], soln_y[self.fig_edges.T],
+        if self.pose_verts is not None:
+            pose_x = self.pose_verts[:,0].flatten()
+            pose_y = self.pose_verts[:,1].flatten()
+            pose_y = vflip(pose_y)
+            plt.plot(pose_x[self.fig_edges.T], pose_y[self.fig_edges.T],
                     linestyle='-', color='green', markerfacecolor='green', marker='o')
 
         plt.show()
@@ -163,7 +167,7 @@ class PoseProb:
             return True
         # TODO: Add test for epsilon distortion
 
-    def read_soln(self, id):
+    def read_pose(self, id):
         """Reads solution from local JSON file
         Allows for multiple solutions per problem
         """
@@ -172,8 +176,11 @@ class PoseProb:
     def solve(self):
         # Is the original problem already solved?
         if self.is_soln(self.fig_verts):
-            self.soln_verts = self.fig_verts.copy()
+            self.pose_verts = self.fig_verts.copy()
             return
+
+        if self.tools is None:
+            self.init_tools()
 
         # Temporary question: Is there a cut component that, with the cut points, lives entirely within the hole?
         # TODO: Also check edges.
@@ -186,8 +193,10 @@ class PoseProb:
     def score(self, verts):
         pass
 
+    def submit(self):
+        pass
 
-    def write_soln(self):
+    def write_pose(self):
         pass
 
 
@@ -205,11 +214,11 @@ def test_display():
 
     prob2 = PoseProb(2)
 
-    prob2.soln_verts = prob2.fig_verts.copy()
+    prob2.pose_verts = prob2.fig_verts.copy()
     # np_hshift5 = np.vectorize(hshift5)  # Vectorize isn't very efficient, but that's OK.
-    # prob2.soln_verts = np_hshift5(prob2.soln_verts)
-    for k in range(len(prob2.soln_verts)):
-        prob2.soln_verts[k][0] += 5
+    # prob2.pose_verts = np_hshift5(prob2.pose_verts)
+    for k in range(len(prob2.pose_verts)):
+        prob2.pose_verts[k][0] += 5
     prob2.display()
 
 
@@ -233,4 +242,4 @@ if __name__ == '__main__':
        prob.init_tools()
        prob.solve()
        # prob.display()
-       prob.write_soln()
+       prob.write_pose()

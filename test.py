@@ -3,7 +3,7 @@
 import unittest
 
 from util import test_is_inside_sm_parallel
-from poses import test_analyze
+from poses import test_init_tools
 
 
 class TestPose(unittest.TestCase):
@@ -11,7 +11,7 @@ class TestPose(unittest.TestCase):
         test_is_inside_sm_parallel()
 
     def test_poseprob(self):
-        test_analyze()
+        test_init_tools()
 
 
 if __name__ == '__main__':
