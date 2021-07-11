@@ -6,4 +6,4 @@ numba
 numpy
 time
 unittest
-urllib2
+urllib3
