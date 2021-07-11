@@ -1,13 +1,19 @@
 #!/usr/bin/env python
 
+from collections import defaultdict
+import copy
 from dataclasses import dataclass
 import os
+from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import NewType
 
 import json
 from matplotlib import pyplot as plt
 import networkx as nx
 from networkx.algorithms.components import connected_components
+from networkx.classes.graph import Graph
 import numpy as np
+# import numpy.typing as npt
 
 import http.client as httplib
 import urllib3
@@ -15,54 +21,105 @@ import urllib3
 import geom
 
 
+Proximity = NewType('Proximity', Tuple[np.ndarray, float])
+
+
+# Abbreviations used
+#   * cc   = connected component
+#   * cp   = cut point
+#   * fig  = figure
+#   * rot  = rotation
+#   * soln = solution
+#   * vec  = vector
+#   * vert = vertex
+
+
 @dataclass
 class PoseTools:
     graph = None
+
     cut_points = None
-    cut_components = None
+    # rot_components = None
+
+    flip_components = None
+
     vertnum2is_in_hole = None
     vertnum2proximity = None
 
     def __init__(self, prob):
-        self.graph = nx.convert.from_edgelist(prob.fig_edges)
+        self.graph:Graph = nx.convert.from_edgelist(prob.fig_edges)  # Nodes are vertex ordinals
         assert(self.graph is not None)
-        self.cut_points = list(nx.articulation_points(self.graph))
+
+        self.cut_points:List[np.int64] = list(nx.articulation_points(self.graph))
         assert(self.cut_points is not None)
-        cp2nbrs = {cp:set(self.graph.neighbors(cp))
-                      for cp in self.cut_points
-                      }
+        cp2nbrs:Map[np.int64, Set[np.int64]] = {
+                cp:set(self.graph.neighbors(cp))
+                for cp in self.cut_points
+                }
 
-        cut_graph = self.graph.copy()
-        cut_graph.remove_nodes_from(self.cut_points)
-        self.cut_components = connected_components(cut_graph)
+        ############################################################
+        # cc_graph: Closed Component Graph & rot_components
+        ############################################################
+        sliced_graph = self.graph.copy()
+        sliced_graph.remove_nodes_from(self.cut_points)
+        self.conn_components = list(map(frozenset, connected_components(sliced_graph)))
+        ccid_to_cpid:Dict[Int, Set[Int]] = defaultdict(set)
+        cpid_to_ccid:Dict[Int, Set[Int]] = defaultdict(set)
 
-        # Convert cut_components from generate to list, allowing the cc's to be individually referenceable.
-        self.cut_components = [cc for cc in self.cut_components]
+        for cpid in range(len(self.cut_points)):
+            for ccid in range(len(self.conn_components)):
+                if any((v in cp2nbrs[self.cut_points[cpid]] for v in self.conn_components[ccid])):
+                    # print(f'INFO: Adding cut point {cpid} to a rot component')
+                    ccid_to_cpid[ccid].add(-cpid)
+                    cpid_to_ccid[-cpid].add(ccid)
 
-        # Add each cutpoint to each of its neighboring cut components
-        for cp in self.cut_points:
-            for cc in self.cut_components:
-                if any((node in cp2nbrs[cp] for node in cc)):
-                    # print(f'INFO: Adding cut point {cp} to a cut component')
-                    cc.add(cp)
+        # Make the connected component graph (from the original figure, less cut points)
+        self.cc_graph = nx.Graph()  # Nodes have type="component" (connected component) or type="cutpoint" (cutpoints)
+        for ccid in range(len(self.conn_components)):
+            self.cc_graph.add_node(ccid, type='component')
+        for cpid in range(len(self.cut_points)):
+            self.cc_graph.add_node(-cpid, type='cutpoint')
 
-        self.vertnum2is_in_hole = {k:geom.is_inside_polygon(prob.hole, prob.fig_verts[k])
-                                      for k in range(len(prob.fig_verts))
-                                      }
-        self.vertnum2proximity = {k:prob.hole_proximity_vert(prob.fig_verts[k])
-                                  for k in range(len(prob.fig_verts))
-                                  }
+        for cpid, ccids in cpid_to_ccid.items():
+            for ccid in ccids:
+                self.cc_graph.add_edge(cpid, ccid)
+
+        ############################################################
+        # flip_graph: Closed Component Graph & rot_components
+        # TODO: Find flip components based on cut components with two cut points
+        ############################################################
+        self.flip_triples = []
+        for e in prob.fig_edges:
+            g_less_e = self.graph.copy()
+            g_less_e.remove_edge(e[0], e[1])
+            g_less_e.remove_node(e[0])
+            g_less_e.remove_node(e[1])
+            ccs = list(connected_components(g_less_e))
+            if len(ccs) > 1:  # Found a cut capped edge (see README)
+                self.flip_triples.append((ccs[0], e, ccs[1]))
+
+        self.vertnum2is_in_hole:Map[int, bool] = {
+                k:geom.is_inside_polygon(prob.hole, prob.fig_verts[k])
+                for k in range(len(prob.fig_verts))
+                }
+
+        self.vertnum2proximity:Dict[int, Proximity] = {
+                k:prob.hole_proximity_vert(prob.fig_verts[k])
+                for k in range(len(prob.fig_verts))
+                }
+
         # self.edge2proximity = {e:self.hole_proximity_edge(e) for e in self.graph.edges()}
+
+    def rot_component_ids(self):
+        for cc, attrs in self.cc_graph.nodes(data=True):
+            if attrs['type'] == 'component' and self.cc_graph.degree(cc) == 1:
+                yield cc
 
 
 # TODO: Keep attempt iterations distinct from solution?
 class PoseProb:
-    problem_dir = './problems'
-    soln_dir = './solutions'
-
-    @classmethod
-    def download(id):
-        raise NotImplementedError
+    PROBLEM_DIR = './problems'
+    SOLUTION_DIR = './solutions'
 
     def __init__(self, id):
         """Loads problem from local file.
@@ -101,16 +158,17 @@ class PoseProb:
         Called by constructor
         Only one problem file per id
         """
-        in_path = os.path.join(PoseProb.problem_dir, str(id) + '.problem')
+        in_path = os.path.join(PoseProb.PROBLEM_DIR, str(id) + '.problem')
         with open(in_path, 'r') as f:
             problem = json.load(f)
-            hole = problem['hole']
-            fig_verts=problem['figure']['vertices']
-            fig_edges=problem['figure']['edges']
-            epsilon=problem['epsilon']
+            hole:List[List[int]]      = problem['hole']
+            fig_verts:List[List[int]] = problem['figure']['vertices']
+            fig_edges:List[List[int]] = problem['figure']['edges']
+            epsilon:int               = problem['epsilon']
+
             return hole, fig_verts, fig_edges, epsilon
 
-    def dislikes(self):
+    def dislikes(self) -> int:
         result = 0
         for h in self.hole:
             distances = [geom.dist_vert_vert(h, v) for v in self.pose_verts]
@@ -143,6 +201,20 @@ class PoseProb:
 
         plt.show()
 
+    def get_nudge_dist(self, verts):
+        """
+        Each vertex crossing the hole boundary requires a nudge (a translation) to get it to fit the hole.
+        @returns the largest vector needed for any of the vertices in the collection (TODO: Exact type)
+        """
+        raise NotImplementedError
+
+    def get_twist_angle(self, center, verts) -> float:
+        """
+        If the top of a region needs to be moved left, and the bottom needs to be moved right,
+        then rotating the verts might get it to fit in the hole.
+        """
+        raise NotImplementedError
+
     def hole_proximity_vert(self, node):
         return geom.vec_dist_polygon_vert(self.hole, node)
 
@@ -152,7 +224,7 @@ class PoseProb:
         """
         self.tools = PoseTools(prob=self)
 
-    def is_edgelist_in_hole(self, verts):
+    def is_edgelist_in_hole(self, verts) -> bool:
         # Step 1: Test whether verts[0] lies inside hole
         if not geom.is_inside_polygon(self.hole, verts[0]):
             return False
@@ -168,7 +240,7 @@ class PoseProb:
         return True
 
     # TODO: Test cases: figure {vertex,edge} {intersects,overlaps} hole {vertex,edge}
-    def is_soln(self, verts):
+    def is_soln(self, verts) -> bool:
         """Solution criteria (from spec PDF):
         (a) Conn: All graph manipulations preserve vertex connectedness
         (b) Eps:  Edges can only be compressed or stretched within epsilon threshold: abs((d' / d) - 1) <= eps/1_000_000
@@ -189,45 +261,59 @@ class PoseProb:
                             )
             distortion = abs((new_dist / old_dist) - 1)
             if distortion > (self.epsilon / 1_000_000):
-                print(f'INFO: is_soln: Failed Epsilon criterion')
+                # print(f'INFO: is_soln: Failed Epsilon criterion')
                 return False
 
         # (c) Fit
         if not self.is_edgelist_in_hole(verts):
-            print(f'INFO: is_soln: Failed Fit criterion')
+            # print(f'INFO: is_soln: Failed Fit criterion')
             return False
 
         return True
 
     def pose_verts_to_json(self):
         result = {'vertices': json.dumps(self.pose_verts)}
-        print(f'INFO: pose_verts_to_json: result={result}')
+        # print(f'INFO: pose_verts_to_json: result={result}')
         return result
 
-    def read_pose(self, id):
+    def read_pose(self, id) -> None:
         """Reads solution from local JSON file
         Allows for multiple solutions per problem
         """
         pass
 
-    def solve(self):
+    def solve(self) -> bool:
+        """Attempt to solve the problem, using the problem definition and data computed in self.tools
+        Things to try (iteratively), not necessarily in this order:
+          * Translate figure as a whole.
+          * Rotate "free" cut components around their cut points.
+          * Flip portions of the figure over "creases" (cut edges that do not contain a cut point).
+          * Squash & stretch.
+        """
         # Is the original problem already solved?
         if self.is_soln(self.fig_verts):
             self.pose_verts = self.fig_verts.copy()
-            return
+            return True
 
         if self.tools is None:
             self.init_tools()
+        assert(self.tools)
 
         # Temporary question: Is there a cut component that, with the cut points, lives entirely within the hole?
         # TODO: Also check edges.
-        for cc in self.tools.cut_components:
-            if all(geom.is_inside_polygon(self.hole, self.fig_verts[node_i]) for node_i in cc):
-                print(f'INFO: {self.id}: Found cut component with verts entirely within hole')
+        # for ccid in self.tools.rot_component_ids():
+        #     if all(geom.is_inside_polygon(self.hole, self.fig_verts[node_i]):
+        #         print(f'INFO: {self.id}: Found cut component with verts entirely within hole')
 
         # print('INFO: Failed to find solution')
 
-    def submit(self):
+        self.pose_verts = self.fig_verts.copy()
+
+        # TODO: Iterative transforms
+
+        return self.is_soln(self.pose_verts)
+
+    def submit(self) -> None:
         host = 'poses.live'
         url = f'/problems/{self.id}/solutions'
         api_token = os.environ['ICFP_2021_API_TOKEN']
@@ -247,11 +333,36 @@ class PoseProb:
         print('Data: ')
         print(data)
 
-    def write_pose(self, fname):
+    def write_pose(self, fname) -> None:
+        if not os.path.exists(PoseProb.SOLUTION_DIR):
+            os.makedirs(PoseProb.SOLUTION_DIR)
+
+        with open(f'solutions/{self.id}.solution', 'w') as f:
+            json.dump({ 'vertices': self.pose_verts.tolist() }, f)
+
+    def xform_flip_component(self, edge, fc) -> None:
+        """Flip the specified FlipComponent (@fc) across its flip line (@param edge)"""
+        for vi in fc:
+            self.pose_verts[vi] = geom.reflect_across_edge(edge, self.pose_verts[vi])
+            
+    def xform_rotate_component(self, rc, angle) -> None:
+        """Rotate the specified rot_component (@rc) clockwise about its cut point through the given angle (@angle)
+        Since we're using integral coordinates, we round off to the nearest integer.
+        """
         raise NotImplementedError
 
+    def xform_stretch(self, verts, base, dir, sfactor) -> None:
+        """
+        Move each specified vert v in the direction dir by an amount determined by (v-base) and sfactor.
+        @param sfactor:
+          - Values less than 1 contract v along dir toward base
+          - Values greater than 1 extend v along dir away from base
+        """
+        for v in verts:
+            v += (1 - sfactor) * proj_vec_onto(v - base, dir)
 
-def test_init_tools():
+
+def test_init_tools() -> None:
     prob3 = PoseProb(3)
     assert(len(prob3.fig_verts) == 36)
     prob3.init_tools()
@@ -259,7 +370,7 @@ def test_init_tools():
     assert(len(prob3.tools.cut_points) == 16)
 
 
-def test_display():
+def test_display() -> None:
     def hshift5(p):
         return np.array([p[0] + 5, p[1]])
 
@@ -273,7 +384,7 @@ def test_display():
     prob2.display()
 
 
-def test_is_soln():
+def test_is_soln() -> None:
     prob6mod = PoseProb(6)
 
     assert(not prob6mod.is_soln(prob6mod.fig_verts))  # Original figure is not a solution
@@ -294,4 +405,4 @@ if __name__ == '__main__':
        prob.solve()
        # prob.display()
        if prob.pose_verts is not None:
-           prob.write_pose(os.path.join(PoseProb.soln_dir, f'{self.id}.solution'))
+           prob.write_pose(os.path.join(PoseProb.SOLUTION_DIR, f'{prob.id}.solution'))

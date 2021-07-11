@@ -48,7 +48,11 @@ def is_inside_polygon(polygon, point):
 
 
 def norm(v):
-    return sqrt(dot(v, v))
+    return sqrt(norm2(v))
+
+
+def norm2(v):
+    return dot(v, v)
 
 
 def orientation(a, b, c):
@@ -60,6 +64,10 @@ def orientation(a, b, c):
 
     det = (b[1] - a[1]) * (c[0] - b[0]) - (b[0] - a[0]) * (c[1] - b[1])
     return sgn(det)
+
+
+def proj_vec_onto(v, dir):
+    return (dot(v, dir) / norm2(dir)) * dir
 
 
 # TODO: Take edges into account
@@ -121,7 +129,7 @@ def verts_to_closed_polygon_edges(verts):
             )
 
 
-# ---------------------------------------- 
+# ----------------------------------------
 # From https://github.com/sasamil/PointInPolygon_Py/blob/master/pointInside.py
 #   - No license file. Will remove from this repo upon requrest.
 # Found on stackoverflow at https://stackoverflow.com/questions/36399381/whats-the-fastest-way-of-checking-if-a-point-is-inside-a-polygon-in-python
