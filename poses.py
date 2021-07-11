@@ -12,11 +12,7 @@ import numpy as np
 import http.client as httplib
 import urllib3
 
-from util import is_inside_sm
-from util import do_edges_cross
-from util import geom_vec_dist_polygon_vertex
-from util import geom_dist_vertex_vertex
-from util import verts_to_closed_polygon_edges
+import geom
 
 
 @dataclass
@@ -50,7 +46,7 @@ class PoseTools:
                     # print(f'INFO: Adding cut point {cp} to a cut component')
                     cc.add(cp)
 
-        self.vertnum2is_in_hole = {k:is_inside_sm(prob.hole, prob.fig_verts[k])
+        self.vertnum2is_in_hole = {k:geom.is_inside_polygon(prob.hole, prob.fig_verts[k])
                                       for k in range(len(prob.fig_verts))
                                       }
         self.vertnum2proximity = {k:prob.hole_proximity_vert(prob.fig_verts[k])
@@ -117,7 +113,7 @@ class PoseProb:
     def dislikes(self):
         result = 0
         for h in self.hole:
-            distances = [geom_dist_vertex_vertex(h, v) for v in self.pose_verts]
+            distances = [geom.dist_vert_vert(h, v) for v in self.pose_verts]
             result += min(distances)
         return result
 
@@ -148,7 +144,7 @@ class PoseProb:
         plt.show()
 
     def hole_proximity_vert(self, node):
-        return geom_vec_dist_polygon_vertex(self.hole, node)
+        return geom.vec_dist_polygon_vert(self.hole, node)
 
     def init_tools(self):
         """Initializes info helpful in solving problem.
@@ -158,15 +154,15 @@ class PoseProb:
 
     def is_edgelist_in_hole(self, verts):
         # Step 1: Test whether verts[0] lies inside hole
-        if not is_inside_sm(self.hole, verts[0]):
+        if not geom.is_inside_polygon(self.hole, verts[0]):
             return False
 
         # Step 2: Test whether any edges cross hole boundary
-        hole_edges = verts_to_closed_polygon_edges(self.hole)
+        hole_edges = geom.verts_to_closed_polygon_edges(self.hole)
         fig_edges = [(self.fig_verts[a], self.fig_verts[b]) for a,b in self.fig_edges]
         for hole_edge in hole_edges:
             for fig_edge in fig_edges:
-                if do_edges_cross(hole_edge, fig_edge):
+                if geom.do_edges_cross(hole_edge, fig_edge):
                     return False
 
         return True
@@ -183,11 +179,11 @@ class PoseProb:
 
         # (b) Epsilon
         for ei in range(len(self.fig_edges)):
-            old_dist = geom_dist_vertex_vertex(
+            old_dist = geom.dist_vert_vert(
                             self.fig_verts[self.fig_edges[ei][0]],
                             self.fig_verts[self.fig_edges[ei][1]]
                             )
-            new_dist = geom_dist_vertex_vertex(
+            new_dist = geom.dist_vert_vert(
                             verts[self.fig_edges[ei][0]],
                             verts[self.fig_edges[ei][1]]
                             )
@@ -226,7 +222,7 @@ class PoseProb:
         # Temporary question: Is there a cut component that, with the cut points, lives entirely within the hole?
         # TODO: Also check edges.
         for cc in self.tools.cut_components:
-            if all(is_inside_sm(self.hole, self.fig_verts[node_i]) for node_i in cc):
+            if all(geom.is_inside_polygon(self.hole, self.fig_verts[node_i]) for node_i in cc):
                 print(f'INFO: {self.id}: Found cut component with verts entirely within hole')
 
         # print('INFO: Failed to find solution')
