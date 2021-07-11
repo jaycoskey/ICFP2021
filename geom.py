@@ -11,6 +11,15 @@ import numba
 import numpy as np
 
 
+
+def dist_vert_vert(a, b):
+    return sqrt(dist2_vert_vert(a, b))
+
+
+def dist2_vert_vert(a, b):
+    return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
+
+
 def do_edges_cross(e1, e2):
     a1, b1 = e1
     a2, b2 = e2
@@ -26,16 +35,12 @@ def do_edges_cross(e1, e2):
     return False
 
 
-def dist_vert_vert(a, b):
-    return sqrt(dist2_vert_vert(a, b))
-
-
-def dist2_vert_vert(a, b):
-    return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
-
-
 def dot(a, b):
     return a[0] * b[0] + a[1] * b[1]
+
+
+def edge_vec(e):
+    return (e[1][0] - e[0][0], e[1][1] - e[0][1])
 
 
 def is_inside_polygon(polygon, point):
@@ -60,7 +65,7 @@ def orientation(a, b, c):
 # TODO: Take edges into account
 def proximity(verts, edges, node):
     """Return vector pointing from node to nearest vert."""
-    min_dist = distance_vert_vert(verts[0], node)
+    min_dist = dist_vert_vert(verts[0], node)
     min_vec  = verts[0] - node
     for v in verts:
         cur_dist = distance_vert_vert(v, node)
@@ -68,6 +73,17 @@ def proximity(verts, edges, node):
             min_dist = cur_dist
             min_vec = v - node
     return min_vec
+
+
+def reflect_across_edge(e, vert):
+    normal = rot90(edge_vec(e))
+    delta = vert - e[0]
+    result = e[0] + delta - 2 * proj_onto(delta, normal)
+    return result
+
+
+def rot90(vert):
+    return np.array(-vert[1], vert[0])
 
 
 def vec_dist_edge_vert(a, b, node):
@@ -189,8 +205,6 @@ def test_is_inside_sm_parallel():
     plt.ylabel("time (sec)")
     plt.legend(loc = 'best')
     plt.show()
-
-# ---------------------------------------- 
 
 
 if __name__ == '__main__':
