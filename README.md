@@ -1,6 +1,12 @@
 # ICFP2021
 For an overview of this year's ICFP Programming Contest, see its [home page](https://icfpcontest2021.github.io/), or the [final rules specification](https://icfpcontest2021.github.io/spec-v2.0.pdf).
 
+I was participated solo this year. Large teams can make far more progress, but I've found that going solo is more challenging, and is a better learning experience.
+
+Many team used GUI tools and manually tweaked the poses to get answers. Some used a gradient-descent-type approach with a very complicated cost function. Some used SMT solvers. I used an automated process that iteratively applied different transformation in an attempt to find solutions. I would have liked to have added some gradient-descent-type activity as another transform, but I didn't get to that in the allotted 72 hours.
+
+At the beginning of 72-hour period, I was consistently using numpy arrays, and wondering if the problem would lend itself to CUDA. After a while, I found myself less and less with consistent typing. That was when I started using mypy to prevent the typing from getting out of hand. I also let some sections of code repetitive. Some time spent later can tidy them up.
+
 ## Rough Strategy
 * Collect data on proximity of vertices and edges to the boundary of the hole.
   * E.g., for vertices, compute the distances and directions ("**proximity field**") from each vertex to the closest point on the hole boundary. And, of course, track which vertices are inside vs outside the boundary.
