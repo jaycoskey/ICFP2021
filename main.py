@@ -98,6 +98,9 @@ class Topology:
             if len(ccs) > 1:  # Found a cut capped edge (see README)
                 self.flip_triples.append((ccs[0], e, ccs[1]))
 
+    # Note: This doesn't represent all the proper subsets of the graph that can be rotated without changing edge lengths.
+    #       For example, if the figure is a graph that forms a polyline, then the pose can be rotated around every vertex,
+    #       but this method would only return the end-points.
     def rot_component_ids(self):
         for cc, attrs in self.cc_graph.nodes(data=True):
             if attrs['type'] == 'component' and self.cc_graph.degree(cc) == 1:
