@@ -615,6 +615,10 @@ if __name__ == '__main__':
     excluded_prob_ids = [58]  # TODO: Fix math.acos() range error arising with figure #58
     shrink_prob_ids:List[int] = []  # Attempts that might work after contraction toward centroid
 
+    prob_ids = [95, 118, 119, 125]
+    shrink_prob_ids = [66, 68, 74, 75, 89, 90, 102, 105, 106, 107, 110, 121, 123, 128]
+    # Note: 129 would be solved by one more xform---a very slight vertical squash
+
     for prob_id in prob_ids:
         if prob_id in excluded_prob_ids:
             continue
