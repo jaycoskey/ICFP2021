@@ -45,7 +45,7 @@ def reformat(prob_id):
 
 if __name__ == '__main__':
     first = 1
-    last = 88
+    last = 132  # Previous values: 106, 88, 78, 59
     for prob_id in range(first, last + 1):
         download_prob(prob_id)
         time.sleep(0.5)
