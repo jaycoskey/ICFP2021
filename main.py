@@ -3,7 +3,10 @@
 from collections import defaultdict
 import copy
 from dataclasses import dataclass
+from pprint import pprint
+import math
 import os
+import sys
 from typing import Any, Dict, List, Optional, Set, Tuple
 from typing import NewType
 
@@ -16,12 +19,12 @@ import numpy as np
 # import numpy.typing as npt
 
 import http.client as httplib
-import urllib3
+import requests
+# import urllib3
+from urllib.parse import urlencode
 
-import geom
-
-
-Proximity = NewType('Proximity', Tuple[np.ndarray, float])
+import geometry as geom
+from geometry import Proximity
 
 
 # Abbreviations used
@@ -35,16 +38,13 @@ Proximity = NewType('Proximity', Tuple[np.ndarray, float])
 
 
 @dataclass
-class PoseTools:
+class Topology:
     graph = None
 
+    cc_graph = None
     cut_points = None
-    # rot_components = None
-
-    flip_components = None
-
-    vertnum2is_in_hole = None
-    vertnum2proximity = None
+    conn_components = None
+    flip_triples = None
 
     def __init__(self, prob):
         self.graph:Graph = nx.convert.from_edgelist(prob.fig_edges)  # Nodes are vertex ordinals
@@ -57,9 +57,9 @@ class PoseTools:
                 for cp in self.cut_points
                 }
 
-        ############################################################
+        # ============================================================ 
         # cc_graph: Closed Component Graph & rot_components
-        ############################################################
+        # ============================================================ 
         sliced_graph = self.graph.copy()
         sliced_graph.remove_nodes_from(self.cut_points)
         self.conn_components = list(map(frozenset, connected_components(sliced_graph)))
@@ -70,24 +70,24 @@ class PoseTools:
             for ccid in range(len(self.conn_components)):
                 if any((v in cp2nbrs[self.cut_points[cpid]] for v in self.conn_components[ccid])):
                     # print(f'INFO: Adding cut point {cpid} to a rot component')
-                    ccid_to_cpid[ccid].add(-cpid)
-                    cpid_to_ccid[-cpid].add(ccid)
+                    ccid_to_cpid[ccid].add(-1 * cpid)  # Use negative numbers for cut points, to avoid ID collision
+                    cpid_to_ccid[-1 * cpid].add(ccid)
 
         # Make the connected component graph (from the original figure, less cut points)
         self.cc_graph = nx.Graph()  # Nodes have type="component" (connected component) or type="cutpoint" (cutpoints)
         for ccid in range(len(self.conn_components)):
             self.cc_graph.add_node(ccid, type='component')
         for cpid in range(len(self.cut_points)):
-            self.cc_graph.add_node(-cpid, type='cutpoint')
+            self.cc_graph.add_node(-1 * cpid, type='cutpoint')
 
         for cpid, ccids in cpid_to_ccid.items():
             for ccid in ccids:
                 self.cc_graph.add_edge(cpid, ccid)
 
-        ############################################################
+        # ============================================================ 
         # flip_graph: Closed Component Graph & rot_components
         # TODO: Find flip components based on cut components with two cut points
-        ############################################################
+        # ============================================================ 
         self.flip_triples = []
         for e in prob.fig_edges:
             g_less_e = self.graph.copy()
@@ -97,18 +97,6 @@ class PoseTools:
             ccs = list(connected_components(g_less_e))
             if len(ccs) > 1:  # Found a cut capped edge (see README)
                 self.flip_triples.append((ccs[0], e, ccs[1]))
-
-        self.vertnum2is_in_hole:Map[int, bool] = {
-                k:geom.is_inside_polygon(prob.hole, prob.fig_verts[k])
-                for k in range(len(prob.fig_verts))
-                }
-
-        self.vertnum2proximity:Dict[int, Proximity] = {
-                k:prob.hole_proximity_vert(prob.fig_verts[k])
-                for k in range(len(prob.fig_verts))
-                }
-
-        # self.edge2proximity = {e:self.hole_proximity_edge(e) for e in self.graph.edges()}
 
     def rot_component_ids(self):
         for cc, attrs in self.cc_graph.nodes(data=True):
@@ -121,44 +109,42 @@ class PoseProb:
     PROBLEM_DIR = './problems'
     SOLUTION_DIR = './solutions'
 
-    def __init__(self, id):
+    def __init__(self, prob_id):
         """Loads problem from local file.
         Either solve() or read_pose() is called later.
         """
-        self.id = id
+        self.prob_id = prob_id
 
-        prob = self._get_prob(id)
+        prob = self._get_prob(prob_id)
         self.hole = np.array(prob[0])
         self.fig_verts = np.array(prob[1])
         self.fig_edges = np.array(prob[2])
         self.epsilon = int(prob[3])
 
-        # Populated by init_tools()
-        self.tools = None
+        # Populated by init_topology(), which is called by solve()
+        self.topology = None
 
         # Populated by solve or read_pose()
-        self.pose_verts = None
-        self.pose_is_valid = None
-        self.pose_dislikes = None
+        self.pose_verts = None  # Best vertex coords found thus far.
 
     def __repr__(self):
         raise NotImplementedError
 
     def __str__(self):
-        return (f'{self.id}: '
+        return (f'{self.prob_id}: '
                 + f'hole.shape={self.hole.shape}; '
                 + f'fig_verts.shape={self.fig_verts.shape}; '
                 + f'fig_edges.shape={self.fig_edges.shape}; '
                 + f'epsilon%={100*self.epsilon/1_000_000}'
                 )
 
-    def _get_prob(self, id):
+    def _get_prob(self, prob_id):
         """Reads problem from local JSON file
         Returns hole, fig_verts, fig_edges, epsilon
         Called by constructor
         Only one problem file per id
         """
-        in_path = os.path.join(PoseProb.PROBLEM_DIR, str(id) + '.problem')
+        in_path = os.path.join(PoseProb.PROBLEM_DIR, str(prob_id) + '.problem')
         with open(in_path, 'r') as f:
             problem = json.load(f)
             hole:List[List[int]]      = problem['hole']
@@ -167,6 +153,12 @@ class PoseProb:
             epsilon:int               = problem['epsilon']
 
             return hole, fig_verts, fig_edges, epsilon
+
+    def centroid(self):
+        total = np.array([0, 0])
+        for v in self.pose_verts:
+            total += v
+        return (1 / len(self.pose_verts)) * total  # Does this round down to ints?
 
     def dislikes(self) -> int:
         result = 0
@@ -179,7 +171,7 @@ class PoseProb:
         def vflip(x):
             return -x
 
-        plt.title(f'Problem {self.id}')
+        plt.title(f'Problem {self.prob_id}')
         hole_x = self.hole[:,0].flatten()
         hole_y = self.hole[:,1].flatten()
         hole_y = vflip(hole_y)
@@ -199,34 +191,126 @@ class PoseProb:
             plt.plot(pose_x[self.fig_edges.T], pose_y[self.fig_edges.T],
                     linestyle='-', color='green', markerfacecolor='green', marker='o')
 
+        print('INFO: Displaying pose. Close matplotlib window to proceed.')
         plt.show()
 
-    def get_nudge_dist(self, verts):
+ 
+    def get_pose_nudge(self, vids):
         """
-        Each vertex crossing the hole boundary requires a nudge (a translation) to get it to fit the hole.
-        @returns the largest vector needed for any of the vertices in the collection (TODO: Exact type)
+        Sometimes a figure needs a nudge (i.e., translation) to get it to fit in the hole.
+        @returns Recommended translation for pose
+            In case of conflict (e.g., vectors pointing in opposing directions), return None.
+        """
+        proximities = []
+        max_vec = None
+        max_dist = None
+        for vid in vids:
+            # Ignore vertices that fit in the hole
+            if self.is_in_hole(self.pose_verts[vid]):
+                continue
+
+            proximity = self.hole_proximity_of_vert(self.pose_verts[vid])
+            proximities.append(proximity)
+            if max_dist is None or proximity.dist > max_dist:
+                max_vec = proximity.vec
+                max_dist = proximity.dist
+
+        if len(proximities) == 0:
+            return None
+
+        # Q: Are all the proximities within 90 degrees of max_vec?
+        if all(map(lambda prox: geom.dot(prox.vec, max_vec) >= 0, proximities)):
+            return Proximity(max_vec, max_dist)
+        else:
+            return None
+
+    def get_pose_twist(self, pose_verts, center, alpha=1.0):  # -> Optional[float]:
+        """
+        Sometimes a figure needs a slight twist (i.e., rotation) to get it to fit in the hole.
+        If the top of a region needs to be moved left (as indicated by the Promitiy field) ,
+            and the bottom needs to be moved right, then rotating the verts might get it to fit in the hole.
+            Compare with how torque is computed with moments.
+
+        This is intended to be applied to the entire pose.
+        A separate method will be used for rotation component.
+
+        @result Angle in radians
+            In case of conflict (e.g., opposing rotations), return None
+        """
+        angles = []
+        for v in pose_verts:
+            # Ignore vertices that fit in the hole
+            if self.is_in_hole(v):
+                continue
+
+            # TODO: Upgrade to proximity_to_polygon
+            proximity = geom.proximity_to_verts(pose_verts, v)
+
+            # Find angle from Law of Cosines
+            a_vec = v - center
+            c_vec = proximity.vec
+            b_vec = a_vec + c_vec
+            a = geom.norm(a_vec)
+            b = geom.norm(b_vec)
+            c = geom.norm(c_vec)
+            angle = math.acos((a**2 + b**2 - c**2) / (2 * a * b))
+            angles.append(angle)
+
+        if len(angles) == 0:
+            return None
+
+        if all(map(lambda x: x >= 0, angles)):
+            return alpha * max(angles)
+        elif all(map(lambda x: x <= 0, angles)):
+            return alpha * min(angles)
+        else:
+            return None
+
+    def get_rot_component_rotation(self, ccid):
+        """
+        Suggest how much to rotate a rot component.
+        Find all verts of the rot component outside the hole.
+        @returns Recommended angle
+          * If they are all within 90 degrees of the average (from the cut point),
+            then return 180 degrees. (TODO: Improve algorithm)
+          * Otherwise, return None
         """
         raise NotImplementedError
 
-    def get_twist_angle(self, center, verts) -> float:
+    def golf_score(self, pose_verts) -> Tuple[int, float]:
+        """Returns (0, 0) for poses that fit in the hole.
+        Otherwise, returns (count, dist),
+            where count is the number of pose vertices that fall outside the hole,
+            and dist is the largest proximity distance over pose vertices outisde the hole.
         """
-        If the top of a region needs to be moved left, and the bottom needs to be moved right,
-        then rotating the verts might get it to fit in the hole.
-        """
-        raise NotImplementedError
+        outside_count = 0
+        max_outside_dist = 0.0
+        for v in pose_verts:
+            if self.is_in_hole(v):
+                continue
 
-    def hole_proximity_vert(self, node):
-        return geom.vec_dist_polygon_vert(self.hole, node)
+            outside_count += 1
+            prox = self.hole_proximity_of_vert(v)
+            if prox.dist > max_outside_dist:
+                max_outside_dist = prox.dist
+        return (outside_count, max_outside_dist)
 
-    def init_tools(self):
+    def is_rot_component_in_hole(self, ccid):
+        verts = map(lambda vid: self.pose_verts[vid], self.conn_components[ccid])
+        return all(lambda v: self.is_in_hole(v), verts)
+
+    def hole_proximity_of_vert(self, v):
+        return geom.proximity_to_polygon(self.hole, v)
+
+    def init_topology(self):
         """Initializes info helpful in solving problem.
         Example: Cut points in graph, around which components can be freely rotated.
         """
-        self.tools = PoseTools(prob=self)
+        self.topology = Topology(prob=self)
 
     def is_edgelist_in_hole(self, verts) -> bool:
-        # Step 1: Test whether verts[0] lies inside hole
-        if not geom.is_inside_polygon(self.hole, verts[0]):
+        # Step 1: Test whether verts[0] lies in the hole
+        if not self.is_in_hole(verts[0]):
             return False
 
         # Step 2: Test whether any edges cross hole boundary
@@ -238,6 +322,9 @@ class PoseProb:
                     return False
 
         return True
+
+    def is_in_hole(self, v):
+        return geom.is_in_polygon(self.hole, v)
 
     # TODO: Test cases: figure {vertex,edge} {intersects,overlaps} hole {vertex,edge}
     def is_soln(self, verts) -> bool:
@@ -271,103 +358,227 @@ class PoseProb:
 
         return True
 
-    def pose_verts_to_json(self):
-        result = {'vertices': json.dumps(self.pose_verts)}
-        # print(f'INFO: pose_verts_to_json: result={result}')
-        return result
-
-    def read_pose(self, id) -> None:
+    def read_pose(self, prob_id) -> None:
         """Reads solution from local JSON file
         Allows for multiple solutions per problem
         """
         pass
 
-    def solve(self) -> bool:
-        """Attempt to solve the problem, using the problem definition and data computed in self.tools
+    def shrink_pose_verts(self):
+        shrink_factor = (1_000_000 - (0.95 * self.epsilon)) / 1_000_000
+        shrink_test_verts = self.pose_verts.copy()
+        self.xform_shrink(shrink_test_verts, shrink_factor)
+        self.pose_verts = shrink_test_verts
+
+    def solve(self, max_iters=10) -> bool:
+        """Attempt to solve the problem, using the problem definition and data computed in self.topology
         Things to try (iteratively), not necessarily in this order:
           * Translate figure as a whole.
           * Rotate "free" cut components around their cut points.
           * Flip portions of the figure over "creases" (cut edges that do not contain a cut point).
           * Squash & stretch.
+        @param max_iters: Number of times to iterate through transformation attempts
         """
-        # Is the original problem already solved?
-        if self.is_soln(self.fig_verts):
+        if self.pose_verts == None:
             self.pose_verts = self.fig_verts.copy()
+
+        # Is the original problem already solved?
+        if self.is_soln(self.pose_verts):
             return True
 
-        if self.tools is None:
-            self.init_tools()
-        assert(self.tools)
+        if self.topology is None:
+            self.init_topology()
+        assert(self.topology)
 
-        # Temporary question: Is there a cut component that, with the cut points, lives entirely within the hole?
-        # TODO: Also check edges.
-        # for ccid in self.tools.rot_component_ids():
-        #     if all(geom.is_inside_polygon(self.hole, self.fig_verts[node_i]):
-        #         print(f'INFO: {self.id}: Found cut component with verts entirely within hole')
+        cur_golf_score = self.golf_score(self.pose_verts)
+        # ============================================================ 
+        # Iterative transforms
+        # TODO: Refactor to reduce repetition
+        # ============================================================ 
+        did_find_solution = True
 
-        # print('INFO: Failed to find solution')
+        for iter_count in range(1, max_iters + 1):
+            ########## Rotate rot components ########## TODO: Refactor to reduce repetition
+            for ccid in self.topology.rot_component_ids():
+                angle_test_verts = self.pose_verts.copy()
+                for angle in range(30, 360, 30):
+                    rads = math.radians(angle)
+                    angle_test_verts = self.pose_verts.copy()
+                    self.xform_rotate_component(angle_test_verts, ccid, rads)
+                    angle_golf_score = self.golf_score(angle_test_verts)
+                    if angle_golf_score < cur_golf_score:
+                        og = f'cur_golf_score'
+                        ng = f'angle_golf_score'
+                        # print(f'INFO: Rot component rotation improved golf score from {og} to {ng}')
+                        print('.', end='')
+                        cur_golf_score = angle_golf_score
+                        self.pose_verts = angle_test_verts
+                        if cur_golf_score == (0, 0.0):
+                            return True
 
-        self.pose_verts = self.fig_verts.copy()
+            # ========== Flip flip components ========== TODO: Refactor to reduce repetition
+            for flip_trip in self.topology.flip_triples:
+                left_comp, edge, right_comp = flip_trip
 
-        # TODO: Iterative transforms
+                left_test_verts = self.pose_verts.copy()
+                self.xform_flip_component(left_test_verts, edge, left_comp)
+                left_golf_score = self.golf_score(left_test_verts)
+                if left_golf_score < cur_golf_score:
+                    og = f'cur_golf_score'
+                    ng = f'left_golf_score'
+                    # print(f'INFO: Flip improved golf score from {og} to {ng}')
+                    print('.', end='')
+                    cur_golf_score = left_golf_score
+                    self.pose_verts = left_test_verts
+                    if cur_golf_score == (0, 0.0):
+                        return True
 
-        return self.is_soln(self.pose_verts)
+                right_test_verts = self.pose_verts.copy()
+                self.xform_flip_component(right_test_verts, edge, right_comp)
+                right_golf_score = self.golf_score(right_test_verts)
+                if right_golf_score < cur_golf_score:
+                    og = f'cur_golf_score'
+                    ng = f'right_golf_score'
+                    # print(f'INFO: Flip improved golf score from {og} to {ng}')
+                    print('.', end='')
+                    cur_golf_score = right_golf_score
+                    self.pose_verts = right_test_verts
+                    if cur_golf_score == (0, 0.0):
+                        return True
 
-    def submit(self) -> None:
+            # ========== Nudge pose ========== TODO: Refactor to reduce repetition
+            nudge_test_verts = self.pose_verts.copy()
+            nudge = self.get_pose_nudge(range(len(self.pose_verts)))
+            if nudge is not None:
+                self.xform_translate(nudge_test_verts, nudge.vec)
+                nudge_golf_score = self.golf_score(nudge_test_verts)
+                if nudge_golf_score < cur_golf_score:
+                    og = f'cur_golf_score'
+                    ng = f'nudge_golf_score'
+                    # print(f'INFO: Nudge improved golf score from {og} to {ng}')
+                    print('.', end='')
+                    cur_golf_score = nudge_golf_score
+                    self.pose_verts = nudge_test_verts
+                    if cur_golf_score == (0, 0.0):
+                        return True
+
+            # ========== Twist pose ========== TODO: Refactor to reduce repetition
+            twist_test_verts = self.pose_verts.copy()
+
+            angle = self.get_pose_twist(twist_test_verts, self.centroid())
+            if angle is not None:
+                self.xform_twist(twist_test_verts, self.centroid(), angle)
+                twist_golf_score = self.golf_score(twist_test_verts)
+                if twist_golf_score < cur_golf_score:
+                    og = f'cur_golf_score'
+                    ng = f'nudge_golf_score'
+                    # print(f'INFO: Nudge improved golf score from {og} to {ng}')
+                    print('.', end='')
+                    cur_golf_score = twist_golf_score
+                    self.pose_verts = twist_test_verts
+                    if cur_golf_score == (0, 0.0):
+                        return True
+
+            # ========== TODO: Stretch ========== 
+
+        return False
+
+    def submit(self, do_submit=True) -> None:
+        print(f'INFO: Entering submit for problem #{self.prob_id}')
         host = 'poses.live'
-        url = f'/problems/{self.id}/solutions'
+        path = f'/api/problems/{self.prob_id}/solutions'
+        url = f'https://{host}{path}'
         api_token = os.environ['ICFP_2021_API_TOKEN']
         headers = {
                 'User-Agent': 'python',
                 'Content-Type': 'application/x-www-form-urlencoded',
-                'Authorization': api_token,
+                'Authorization': 'Bearer ' + api_token
                 }
-        content = urllib3.urlencode(self.pose_verts_to_json())
+        vertices = [[int(coord) for coord in point] for point in self.pose_verts]
+        content = { "vertices": vertices }
+        print(f'Unencoded content={content}')
+        payload = urlencode(content)
 
-        conn = httplib.HTTPSConnection(host)
-        conn.request('POST', url, content, headers)
-        response = conn.getresponse()
-        data = response.read()
-        print('Solution for #{self.id} submitted')
-        print(f'Response status: {response.status}; reason={response.reason}')
-        print('Data: ')
-        print(data)
+        net_pkg = 'httplib'
+        # net_pkg = 'requests'
+
+        # Add 1 & 2 to identifiers to satisfy mypy.
+        if do_submit:
+            print(f'Submitting solution for #{self.prob_id} ... ', end='')
+            if net_pkg == 'httplib':
+                conn1 = httplib.HTTPSConnection(host)
+                conn1.request('POST', path, payload, headers)
+                response1 = conn1.getresponse()
+                data1 = response1.read()
+            elif net_pkg == 'requests':
+                response2 = requests.post(f'https://{host}{path}', data=payload, json=headers)
+            print('Done!')
+    
+            if net_pkg == 'httplib':
+                print(f'\tResponse status: {response1.status} ({response1.reason})')
+                print(f'\tResponse data  : {str(data1)}')
+            elif net_pkg == 'requests':
+                print(f'\tResponse status: {response2.status_code} ({response2.reason})')
+        else:
+            print(f'INFO: Skipping submission')
 
     def write_pose(self, fname) -> None:
         if not os.path.exists(PoseProb.SOLUTION_DIR):
             os.makedirs(PoseProb.SOLUTION_DIR)
 
-        with open(f'solutions/{self.id}.solution', 'w') as f:
+        with open(f'solutions/{self.prob_id}.solution', 'w') as f:
             json.dump({ 'vertices': self.pose_verts.tolist() }, f)
 
-    def xform_flip_component(self, edge, fc) -> None:
+    def xform_flip_component(self, pose_verts, edge, fc) -> None:
         """Flip the specified FlipComponent (@fc) across its flip line (@param edge)"""
         for vi in fc:
-            self.pose_verts[vi] = geom.reflect_across_edge(edge, self.pose_verts[vi])
-            
-    def xform_rotate_component(self, rc, angle) -> None:
+            edge2 = (pose_verts[edge[0]], pose_verts[edge[1]])
+            pose_verts[vi] = geom.reflect_across_edge(edge2, pose_verts[vi])
+
+    def xform_rotate_component(self, pose_verts, ccid, radians) -> None:
         """Rotate the specified rot_component (@rc) clockwise about its cut point through the given angle (@angle)
         Since we're using integral coordinates, we round off to the nearest integer.
         """
-        raise NotImplementedError
+        ccg = self.topology.cc_graph
+        rot_component = ccg[ccid]
+        rot_component_nbrs = ccg.neighbors(ccid)
+        cpid = list(rot_component_nbrs)[0]  # In cc_graph, rot components have exactly one neighbor: a cut point
+        cp = pose_verts[cpid]
+        for vid in self.topology.conn_components[ccid]:
+            v = pose_verts[vid]
+            v = geom.rotate_around_point(cp, radians, v)
+
+    def xform_shrink(self, pose_verts, sfactor):
+        """Axial shrinkabe, centered at the pose's centroid()"""
+        for v in pose_verts:
+            v = scale_around_point(self.centroid(), sfactor, v)
 
     def xform_stretch(self, verts, base, dir, sfactor) -> None:
         """
-        Move each specified vert v in the direction dir by an amount determined by (v-base) and sfactor.
+        Axial stretching: Move each vert v in the direction dir by an amount determined by (v-base) and sfactor.
         @param sfactor:
           - Values less than 1 contract v along dir toward base
           - Values greater than 1 extend v along dir away from base
         """
         for v in verts:
-            v += (1 - sfactor) * proj_vec_onto(v - base, dir)
+            v += (1 - sfactor) * geom.proj_vec_onto(v - base, dir)
+
+    def xform_translate(self, pose_verts, translation_vec) -> None:
+        for v in pose_verts:
+            # TODO: Audit choices of types to make lines like the following concise
+            v = [v[0] + translation_vec[0], v[1] + translation_vec[1]]
+
+    def xform_twist(self, pose_verts, center, radians) -> None:
+        for v in pose_verts:
+            v = geom.rotate_around_point(center, radians, v)
 
 
-def test_init_tools() -> None:
+def test_init_topology() -> None:
     prob3 = PoseProb(3)
     assert(len(prob3.fig_verts) == 36)
-    prob3.init_tools()
-    assert(len(prob3.tools.graph) == 36)
-    assert(len(prob3.tools.cut_points) == 16)
+    prob3.init_topology()
+    assert(len(prob3.topology.graph) == 36)
+    assert(len(prob3.topology.cut_points) == 16)
 
 
 def test_display() -> None:
@@ -395,14 +606,23 @@ def test_is_soln() -> None:
 
 
 if __name__ == '__main__':
-    test_init_tools()
+    test_init_topology()
     # test_display()
     test_is_soln()
-    for id in range(1, 10+1):
-       prob = PoseProb(id)
-       print(prob)
-       prob.init_tools()
-       prob.solve()
-       # prob.display()
-       if prob.pose_verts is not None:
-           prob.write_pose(os.path.join(PoseProb.SOLUTION_DIR, f'{prob.id}.solution'))
+    first = 1
+    last = 132  # As of 48 hours into contest, 132 available
+    prob_ids:List[int] = list(range(first, last + 1))
+    excluded_prob_ids = [58]  # TODO: Fix math.acos() range error arising with figure #58
+
+    for prob_id in prob_ids:
+        if prob_id in excluded_prob_ids:
+            continue
+        prob = PoseProb(prob_id)
+        print(prob)
+        if prob.solve():
+            print('INFO: Found a solution!')
+            if prob_id in shrink_prob_ids:
+                prob.shrink_pose_verts()
+            prob.display()
+            prob.write_pose(os.path.join(PoseProb.SOLUTION_DIR, f'{prob.prob_id}.solution'))
+            prob.submit()
