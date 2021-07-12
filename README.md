@@ -21,7 +21,7 @@ For an overview of this year's ICFP Programming Contest, see its [home page](htt
 * Iterate, iterate, iterate.
 
 ## Rotatable and Flippable Regions
-* Consider ![this figure](images/pose_diagram.png).
+* Consider this figure: ![diagram of a labeled graph](images/pose_diagram.png).
   * The cut points in the graph, A and B, are shaded pink. They divide the graph into three regions, which I'll call R-D (which includes the edge AD), R-F (which includes the edge BF), and the remaining region, R-ABCE. Regions R-D and R-F can freely rotate around their respective cut points, but region R-ABCE cannot, because it is anchored at both of those cut points.
   How can we determine which edges form "**creases**" that allow one side of the crease to be "flipped" across it?
   The edge CE forms such a crease. But if there were an edge from A to B, then CE would no longer be a crease.
