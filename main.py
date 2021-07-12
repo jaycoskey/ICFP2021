@@ -613,6 +613,7 @@ if __name__ == '__main__':
     last = 132  # As of 48 hours into contest, 132 available
     prob_ids:List[int] = list(range(first, last + 1))
     excluded_prob_ids = [58]  # TODO: Fix math.acos() range error arising with figure #58
+    shrink_prob_ids:List[int] = []  # Attempts that might work after contraction toward centroid
 
     for prob_id in prob_ids:
         if prob_id in excluded_prob_ids:
