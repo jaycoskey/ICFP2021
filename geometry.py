@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
-from math import sqrt
+from collections import namedtuple
+from math import cos, sin, sqrt
 from time import time
 
 
@@ -10,6 +11,9 @@ from numba import jit, njit
 import numba
 import numpy as np
 
+
+# Proximity = NewType('Proximity', Tuple[np.ndarray, float])
+Proximity = namedtuple('Proximity', ['vec', 'dist'])  # np.ndarray, float
 
 
 def dist_vert_vert(a, b):
@@ -40,10 +44,11 @@ def dot(a, b):
 
 
 def edge_vec(e):
-    return (e[1][0] - e[0][0], e[1][1] - e[0][1])
+    """@returns: Vector pointing from e[0] to e[1]"""
+    return [e[1][0] - e[0][0], e[1][1] - e[0][1]]
 
 
-def is_inside_polygon(polygon, point):
+def is_in_polygon(polygon, point):
     return is_inside_sm(polygon, point)
 
 
@@ -67,34 +72,23 @@ def orientation(a, b, c):
 
 
 def proj_vec_onto(v, dir):
-    return (dot(v, dir) / norm2(dir)) * dir
+    return vec_smult(dir, dot(v, dir) / norm2(dir))
 
 
 # TODO: Take edges into account
-def proximity(verts, edges, node):
+def proximity_to_verts(verts, node):
     """Return vector pointing from node to nearest vert."""
     min_dist = dist_vert_vert(verts[0], node)
     min_vec  = verts[0] - node
     for v in verts:
-        cur_dist = distance_vert_vert(v, node)
+        cur_dist = dist_vert_vert(v, node)
         if  cur_dist < min_dist:
             min_dist = cur_dist
             min_vec = v - node
-    return min_vec
+    return Proximity(min_vec, min_dist)
 
 
-def reflect_across_edge(e, vert):
-    normal = rot90(edge_vec(e))
-    delta = vert - e[0]
-    result = e[0] + delta - 2 * proj_onto(delta, normal)
-    return result
-
-
-def rot90(vert):
-    return np.array(-vert[1], vert[0])
-
-
-def vec_dist_edge_vert(a, b, node):
+def proximity_to_edge(a, b, node):
     dist2 = dist2_vert_vert(a, b)
     if dist2 == 0.0:
         return dist_vert_vert(a, node)
@@ -107,19 +101,49 @@ def vec_dist_edge_vert(a, b, node):
     else:
         min_vec = a + t * (b - a) - node
         min_dist = dist_vert_vert(min_vec, node)
-        return min_vec, min_dist
+        return Proximity(min_vec, min_dist)
 
 
-def vec_dist_polygon_vert(poly, node):
+def proximity_to_polygon(poly, node):
     edges = verts_to_closed_polygon_edges(poly)
     e0 = edges[0]
-    min_vec, min_dist = vec_dist_edge_vert(e0[0], e0[1], node)
+    min_vec, min_dist = proximity_to_edge(e0[0], e0[1], node)
     for e in edges[1:]:
-        cur_vec, cur_dist = vec_dist_edge_vert(e0[0], e0[1], node)
+        cur_vec, cur_dist = proximity_to_edge(e0[0], e0[1], node)
         if cur_dist < min_dist:
             min_vec = cur_vec
             min_dist = cur_dist
-    return min_vec, min_dist
+    return Proximity(min_vec, min_dist)
+
+
+def reflect_across_edge(e, vert):
+    parallel = edge_vec(e)
+    normal = rotate90(parallel)
+    delta = vert - e[0]
+    projected = proj_vec_onto(delta, normal)
+    result = vert - vec_smult(projected, 2)
+    return result
+
+
+def rotate_around_point(p, radians, v):
+    c = cos(radians)
+    s = sin(radians)
+    return [c * v[0] - s * v[1], s * v[0] + c * v[1]]
+
+
+def rotate90(vert):
+    if type(vert).__name__ == 'tuple':
+        raise Exception('Look at backtrace; change to list')
+    result = [-vert[1], vert[0]]
+    return result
+
+
+def scale_around_point(self, center, sfactor, v):
+    return center + sfactor * (v - center)
+
+
+def vec_smult(vec, scalar):
+    return [vec[0] * scalar, vec[1] * scalar]
 
 
 def verts_to_closed_polygon_edges(verts):
